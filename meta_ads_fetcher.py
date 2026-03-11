@@ -1,245 +1,261 @@
 """
-Meta Ads Fetcher
-================
-Fetches campaigns, ad sets, ads, and insights from the Meta (Facebook)
-Marketing API using your own Meta App Access Token.
+Meta Ad Library Fetcher — Competitor Analysis
+==============================================
+Fetches competitor ads from Meta's public Ad Library API.
+No special permissions needed beyond a standard Meta user access token.
+
+Official docs: https://www.facebook.com/ads/library/api/
 
 Requirements:
     pip install requests
 
-Usage:
-    python meta_ads_fetcher.py \
-        --token YOUR_ACCESS_TOKEN \
-        --account act_XXXXXXXXXX \
-        --since 2024-01-01 \
-        --until 2024-12-31 \
-        --output output.json
+Usage examples:
+
+  # Search by competitor keyword
+  python meta_ads_fetcher.py \\
+      --token YOUR_ACCESS_TOKEN \\
+      --search "Nike shoes" \\
+      --countries US \\
+      --output nike_ads.json
+
+  # Search by specific competitor Page IDs (up to 10)
+  python meta_ads_fetcher.py \\
+      --token YOUR_ACCESS_TOKEN \\
+      --page-ids 123456789 987654321 \\
+      --countries US GB \\
+      --status ALL \\
+      --output competitor_pages.json
+
+  # Filter to only video ads on Instagram
+  python meta_ads_fetcher.py \\
+      --token YOUR_ACCESS_TOKEN \\
+      --search "protein powder" \\
+      --countries US \\
+      --media-type VIDEO \\
+      --platforms INSTAGRAM \\
+      --output protein_video_ads.json
 """
 
 import argparse
 import json
-import time
 import sys
+import time
 import requests
 
 API_VERSION = "v21.0"
-BASE_URL = f"https://graph.facebook.com/{API_VERSION}"
+AD_LIBRARY_URL = f"https://graph.facebook.com/{API_VERSION}/ads_archive"
 
-# ---------------------------------------------------------------------------
-# Fields to fetch per object level
-# ---------------------------------------------------------------------------
+# All fields the Ad Library API can return
+# Basic fields (available for all ad types)
+BASIC_FIELDS = [
+    "id",                          # Ad Library ID
+    "ad_creative_bodies",          # List of ad copy text bodies
+    "ad_creative_link_captions",   # Link captions in the ad
+    "ad_creative_link_descriptions",
+    "ad_creative_link_titles",
+    "ad_delivery_start_time",      # When the ad started running
+    "ad_delivery_stop_time",       # When the ad stopped (null if still active)
+    "ad_snapshot_url",             # URL to archived ad preview
+    "currency",
+    "page_id",
+    "page_name",
+    "publisher_platforms",         # FACEBOOK, INSTAGRAM, etc.
+    "languages",
+    "bylines",
+    "estimated_audience_size",
+]
 
-CAMPAIGN_FIELDS = ",".join([
-    "id", "name", "status", "objective", "buying_type",
-    "daily_budget", "lifetime_budget", "budget_remaining",
-    "start_time", "stop_time", "created_time", "updated_time",
-    "bid_strategy", "special_ad_categories", "effective_status",
-    "spend_cap",
-])
-
-ADSET_FIELDS = ",".join([
-    "id", "name", "status", "campaign_id",
-    "daily_budget", "lifetime_budget", "budget_remaining",
-    "bid_amount", "bid_strategy", "billing_event",
-    "optimization_goal", "targeting",
-    "start_time", "end_time", "created_time", "updated_time",
-    "effective_status", "destination_type",
-    "instagram_actor_id", "promoted_object",
-    "rf_prediction_id",
-])
-
-AD_FIELDS = ",".join([
-    "id", "name", "status", "adset_id", "campaign_id",
-    "creative", "tracking_specs",
-    "conversion_specs", "bid_amount",
-    "created_time", "updated_time", "effective_status",
-    "ad_review_feedback",
-])
-
-INSIGHT_FIELDS = ",".join([
-    "account_id", "account_name",
-    "campaign_id", "campaign_name",
-    "adset_id", "adset_name",
-    "ad_id", "ad_name",
-    "date_start", "date_stop",
-    "impressions", "reach", "frequency",
-    "clicks", "unique_clicks",
-    "spend", "cpc", "cpm", "ctr", "cpp",
-    "actions", "action_values",
-    "conversions", "conversion_values",
-    "cost_per_action_type",
-    "cost_per_unique_click",
-    "outbound_clicks", "outbound_clicks_ctr",
-    "video_play_actions", "video_thruplay_watched_actions",
-    "video_p25_watched_actions", "video_p50_watched_actions",
-    "video_p75_watched_actions", "video_p100_watched_actions",
-    "website_purchase_roas",
-    "objective", "optimization_goal",
-    "buying_type",
-])
-
-INSIGHT_BREAKDOWNS = ""          # set e.g. "age,gender" to add breakdowns
+# Extended fields available for political/issue ads and all ads in EU/UK
+EXTENDED_FIELDS = [
+    "spend",                       # Estimated spend range {"lower_bound", "upper_bound"}
+    "impressions",                 # Estimated impressions range
+    "demographic_distribution",    # Age/gender breakdown
+    "delivery_by_region",          # Geographic reach breakdown
+    "target_ages",
+    "target_gender",
+    "target_locations",
+    "funding_entity",              # Who paid for the ad
+]
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def paginate(url: str, params: dict) -> list:
-    """Walk through all pages of a Graph API edge and return merged results."""
+def paginate(params: dict, max_results: int = 0) -> list:
+    """Walk all pages of the Ad Library API and return merged results."""
     results = []
+    url = AD_LIBRARY_URL
+
     while url:
         resp = requests.get(url, params=params, timeout=30)
         resp.raise_for_status()
         data = resp.json()
 
         if "error" in data:
-            raise RuntimeError(f"API error: {data['error']}")
+            error = data["error"]
+            raise RuntimeError(
+                f"API error {error.get('code')}: {error.get('message')}\n"
+                f"Type: {error.get('type')}\n"
+                f"Tip: {error.get('error_user_msg', '')}"
+            )
 
         results.extend(data.get("data", []))
+        print(f"  Fetched {len(results)} ads so far...", end="\r", flush=True)
+
+        if max_results and len(results) >= max_results:
+            results = results[:max_results]
+            break
+
         paging = data.get("paging", {})
-        url = paging.get("next")   # None when last page
-        params = {}                 # next URL already contains params
+        next_url = paging.get("next")
+        if not next_url:
+            break
+
+        # next URL already contains all params — clear params dict
+        url = next_url
+        params = {}
+        time.sleep(0.2)   # be gentle with rate limits
+
+    print()  # newline after the \r progress line
     return results
 
 
-def poll_async_job(job_id: str, token: str) -> list:
-    """Poll an async insights job until complete, then return all rows."""
-    url = f"{BASE_URL}/{job_id}"
-    params = {"access_token": token}
-
-    for attempt in range(120):          # up to ~10 minutes
-        resp = requests.get(url, params=params, timeout=30)
-        resp.raise_for_status()
-        job = resp.json()
-
-        async_status = job.get("async_status", "")
-        pct = job.get("async_percent_completion", 0)
-        print(f"  Insights job {job_id}: {async_status} ({pct}%)", flush=True)
-
-        if async_status in ("Job Completed",):
-            result_url = f"{BASE_URL}/{job_id}/insights"
-            return paginate(result_url, {"access_token": token})
-
-        if async_status in ("Job Failed", "Job Skipped"):
-            raise RuntimeError(f"Async insights job failed: {job}")
-
-        time.sleep(5)
-
-    raise TimeoutError("Async insights job timed out after 10 minutes.")
-
-
-def fetch_insights(account_id: str, token: str, since: str, until: str, level: str = "ad") -> list:
-    """Kick off an async insights report and return results."""
-    url = f"{BASE_URL}/{account_id}/insights"
-    payload = {
-        "access_token": token,
-        "fields": INSIGHT_FIELDS,
-        "level": level,
-        "time_range": json.dumps({"since": since, "until": until}),
-        "time_increment": 1,           # daily breakdown
-        "limit": 500,
+def build_params(args, fields: list) -> dict:
+    params = {
+        "access_token": args.token,
+        "fields": ",".join(fields),
+        "ad_type": args.ad_type,
+        "ad_active_status": args.status,
+        "limit": min(args.batch_size, 2000),
     }
-    if INSIGHT_BREAKDOWNS:
-        payload["breakdowns"] = INSIGHT_BREAKDOWNS
 
-    resp = requests.post(url, data=payload, timeout=30)
-    resp.raise_for_status()
-    result = resp.json()
+    # Country targeting (required)
+    params["ad_reached_countries"] = json.dumps(args.countries)
 
-    if "error" in result:
-        raise RuntimeError(f"API error starting insights job: {result['error']}")
+    # Search: keyword OR page IDs (mutually exclusive in practice)
+    if args.search:
+        params["search_terms"] = args.search
+    if args.page_ids:
+        params["search_page_ids"] = ",".join(str(p) for p in args.page_ids)
 
-    # Synchronous response (small accounts)
-    if "data" in result:
-        rows = result["data"]
-        next_url = result.get("paging", {}).get("next")
-        while next_url:
-            r = requests.get(next_url, timeout=30)
-            r.raise_for_status()
-            page = r.json()
-            rows.extend(page.get("data", []))
-            next_url = page.get("paging", {}).get("next")
-        return rows
+    # Optional filters
+    if args.media_type and args.media_type != "ALL":
+        params["media_type"] = args.media_type
+    if args.platforms:
+        params["publisher_platforms"] = json.dumps(args.platforms)
+    if args.languages:
+        params["languages"] = json.dumps(args.languages)
+    if args.since:
+        params["ad_delivery_date_min"] = args.since
+    if args.until:
+        params["ad_delivery_date_max"] = args.until
 
-    # Async job
-    job_id = result.get("report_run_id")
-    if job_id:
-        return poll_async_job(job_id, token)
-
-    raise RuntimeError(f"Unexpected insights response: {result}")
+    return params
 
 
-# ---------------------------------------------------------------------------
-# Main fetch logic
-# ---------------------------------------------------------------------------
+def fetch_ads(args) -> dict:
+    if not args.search and not args.page_ids:
+        raise ValueError("Provide at least --search or --page-ids.")
 
-def fetch_all(account_id: str, token: str, since: str, until: str) -> dict:
-    common = {"access_token": token, "limit": 200}
+    # Try with extended fields first; fall back to basic if permission denied
+    fields = BASIC_FIELDS + EXTENDED_FIELDS
+    params = build_params(args, fields)
 
-    print("Fetching campaigns...")
-    campaigns = paginate(
-        f"{BASE_URL}/{account_id}/campaigns",
-        {**common, "fields": CAMPAIGN_FIELDS},
-    )
-    print(f"  {len(campaigns)} campaigns found.")
+    print("Querying Meta Ad Library API...")
+    try:
+        ads = paginate(params, max_results=args.max_results)
+    except RuntimeError as e:
+        if "extended fields" in str(e).lower() or "200" in str(e):
+            print("  Extended fields not available for this query; retrying with basic fields.")
+            fields = BASIC_FIELDS
+            params = build_params(args, fields)
+            ads = paginate(params, max_results=args.max_results)
+        else:
+            raise
 
-    print("Fetching ad sets...")
-    adsets = paginate(
-        f"{BASE_URL}/{account_id}/adsets",
-        {**common, "fields": ADSET_FIELDS},
-    )
-    print(f"  {len(adsets)} ad sets found.")
-
-    print("Fetching ads...")
-    ads = paginate(
-        f"{BASE_URL}/{account_id}/ads",
-        {**common, "fields": AD_FIELDS},
-    )
-    print(f"  {len(ads)} ads found.")
-
-    print("Fetching insights (ad level, daily)...")
-    insights = fetch_insights(account_id, token, since, until, level="ad")
-    print(f"  {len(insights)} insight rows fetched.")
+    print(f"Total ads fetched: {len(ads)}")
 
     return {
-        "account_id": account_id,
-        "date_range": {"since": since, "until": until},
-        "campaigns": campaigns,
-        "adsets": adsets,
+        "query": {
+            "search_terms": args.search,
+            "page_ids": args.page_ids,
+            "countries": args.countries,
+            "status": args.status,
+            "ad_type": args.ad_type,
+            "media_type": args.media_type,
+            "platforms": args.platforms,
+            "since": args.since,
+            "until": args.until,
+        },
+        "total_ads": len(ads),
         "ads": ads,
-        "insights": insights,
     }
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
-
 def main():
-    parser = argparse.ArgumentParser(description="Fetch Meta Ads data to JSON.")
-    parser.add_argument("--token",   required=True, help="Meta App Access Token")
-    parser.add_argument("--account", required=True, help="Ad Account ID, e.g. act_123456789")
-    parser.add_argument("--since",   required=True, help="Start date YYYY-MM-DD")
-    parser.add_argument("--until",   required=True, help="End date YYYY-MM-DD")
-    parser.add_argument("--output",  default="meta_ads_output.json", help="Output JSON file path")
+    parser = argparse.ArgumentParser(
+        description="Fetch competitor ads from Meta Ad Library API.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+
+    # Auth
+    parser.add_argument("--token", required=True,
+                        help="Meta user access token (from developers.facebook.com)")
+
+    # Search targets
+    parser.add_argument("--search", default=None,
+                        help="Keyword(s) to search in ad copy, e.g. 'Nike shoes'")
+    parser.add_argument("--page-ids", nargs="+", default=None,
+                        help="One or more competitor Facebook Page IDs (max 10)")
+
+    # Required filter
+    parser.add_argument("--countries", nargs="+", default=["US"],
+                        help="Country codes to scope the search, e.g. US GB AU (default: US)")
+
+    # Optional filters
+    parser.add_argument("--status", default="ALL",
+                        choices=["ACTIVE", "INACTIVE", "ALL"],
+                        help="Ad active status (default: ALL)")
+    parser.add_argument("--ad-type", default="ALL",
+                        choices=["ALL", "POLITICAL_AND_ISSUE_ADS", "HOUSING_ADS",
+                                 "EMPLOYMENT_ADS", "FINANCIAL_PRODUCTS_ADS"],
+                        help="Ad category type (default: ALL)")
+    parser.add_argument("--media-type", default="ALL",
+                        choices=["ALL", "IMAGE", "VIDEO", "MEME", "NONE"],
+                        help="Filter by media type (default: ALL)")
+    parser.add_argument("--platforms", nargs="+", default=None,
+                        choices=["FACEBOOK", "INSTAGRAM", "AUDIENCE_NETWORK", "MESSENGER"],
+                        help="Limit to specific platforms")
+    parser.add_argument("--languages", nargs="+", default=None,
+                        help="Filter by language codes, e.g. en es fr")
+    parser.add_argument("--since", default=None,
+                        help="Minimum ad delivery date YYYY-MM-DD")
+    parser.add_argument("--until", default=None,
+                        help="Maximum ad delivery date YYYY-MM-DD")
+
+    # Pagination
+    parser.add_argument("--max-results", type=int, default=0,
+                        help="Stop after N results (0 = fetch everything, default: 0)")
+    parser.add_argument("--batch-size", type=int, default=500,
+                        help="Results per API page, max 2000 (default: 500)")
+
+    # Output
+    parser.add_argument("--output", default="meta_ads_output.json",
+                        help="Output JSON file path (default: meta_ads_output.json)")
+
     args = parser.parse_args()
 
-    account_id = args.account if args.account.startswith("act_") else f"act_{args.account}"
-
     try:
-        data = fetch_all(account_id, args.token, args.since, args.until)
+        result = fetch_ads(args)
     except requests.HTTPError as e:
-        print(f"HTTP error: {e}\nResponse: {e.response.text}", file=sys.stderr)
+        print(f"HTTP {e.response.status_code}: {e.response.text}", file=sys.stderr)
         sys.exit(1)
-    except Exception as e:
+    except (RuntimeError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
     with open(args.output, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, default=str)
+        json.dump(result, f, indent=2, default=str)
 
-    print(f"\nData saved to {args.output}")
+    print(f"Saved to {args.output}")
 
 
 if __name__ == "__main__":
