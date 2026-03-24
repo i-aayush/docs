@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SpaceZ Villas – Bangalore</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    /* ── Reset & base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f0f13; color: #f0ede8; }
+
+    /* ── Header ── */
+    header {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 1100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 28px; height: 58px;
+      background: rgba(10,10,16,0.92);
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+    }
+    .logo { font-size: 1.35rem; font-weight: 700; letter-spacing: .04em; color: #fff; }
+    .logo span { color: #c8a96e; }
+    .tagline { font-size: .78rem; color: #9990; letter-spacing: .12em; text-transform: uppercase; }
+
+    /* ── Map container ── */
+    #map { position: fixed; top: 58px; left: 0; right: 0; bottom: 0; z-index: 0; }
+
+    /* ── Leaflet popup overrides ── */
+    .leaflet-popup-content-wrapper {
+      background: #13131b;
+      border-radius: 18px;
+      box-shadow: 0 24px 60px rgba(0,0,0,.65);
+      border: 1px solid rgba(255,255,255,.1);
+      padding: 0;
+      overflow: hidden;
+      width: 340px !important;
+    }
+    .leaflet-popup-content { margin: 0; width: 100% !important; }
+    .leaflet-popup-tip-container { display: none; }
+    .leaflet-popup-close-button {
+      color: #fff !important; font-size: 22px !important;
+      top: 8px !important; right: 12px !important;
+      z-index: 10; text-shadow: 0 1px 4px #000;
+    }
+
+    /* ── Villa card carousel ── */
+    .villa-card { width: 340px; }
+
+    .carousel {
+      position: relative; width: 100%; height: 210px;
+      overflow: hidden; background: #1a1a24;
+    }
+    .carousel-track {
+      display: flex; height: 100%;
+      transition: transform .4s cubic-bezier(.4,0,.2,1);
+    }
+    .carousel-slide {
+      min-width: 100%; height: 100%;
+      object-fit: cover; display: block;
+    }
+    .carousel-btn {
+      position: absolute; top: 50%; transform: translateY(-50%);
+      width: 34px; height: 34px; border-radius: 50%;
+      background: rgba(0,0,0,.55); border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      color: #fff; font-size: 16px; z-index: 5;
+      transition: background .2s;
+    }
+    .carousel-btn:hover { background: rgba(0,0,0,.82); }
+    .carousel-btn.prev { left: 10px; }
+    .carousel-btn.next { right: 10px; }
+    .carousel-dots {
+      position: absolute; bottom: 8px; left: 0; right: 0;
+      display: flex; justify-content: center; gap: 5px;
+    }
+    .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: rgba(255,255,255,.45); cursor: pointer;
+      transition: background .2s, transform .2s;
+    }
+    .dot.active { background: #fff; transform: scale(1.3); }
+
+    /* ── Villa badge ── */
+    .villa-badge {
+      position: absolute; top: 12px; left: 12px;
+      background: rgba(200,169,110,.92); color: #fff;
+      font-size: .67rem; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; padding: 3px 9px; border-radius: 20px;
+    }
+    .rating-badge {
+      position: absolute; top: 12px; right: 42px;
+      background: rgba(15,15,20,.75); color: #ffd700;
+      font-size: .75rem; font-weight: 700; padding: 3px 8px;
+      border-radius: 20px; display: flex; align-items: center; gap: 3px;
+    }
+
+    /* ── Card body ── */
+    .card-body { padding: 16px 18px 18px; }
+    .villa-name {
+      font-size: 1.12rem; font-weight: 700; color: #fff;
+      margin-bottom: 3px; line-height: 1.25;
+    }
+    .villa-location {
+      font-size: .75rem; color: #9a9; margin-bottom: 10px;
+      display: flex; align-items: center; gap: 5px;
+    }
+    .villa-location svg { flex-shrink: 0; }
+
+    .villa-stats {
+      display: flex; gap: 14px; margin-bottom: 12px;
+    }
+    .stat {
+      display: flex; align-items: center; gap: 5px;
+      font-size: .77rem; color: #bbb;
+    }
+    .stat svg { color: #c8a96e; flex-shrink: 0; }
+
+    .price-row {
+      display: flex; align-items: baseline; justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .price { font-size: 1.28rem; font-weight: 800; color: #c8a96e; }
+    .price sub { font-size: .68rem; font-weight: 400; color: #888; vertical-align: baseline; margin-left: 2px; }
+    .original-price { font-size: .78rem; color: #666; text-decoration: line-through; }
+
+    .amenity-pills {
+      display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px;
+    }
+    .pill {
+      font-size: .68rem; padding: 3px 10px; border-radius: 20px;
+      background: rgba(200,169,110,.12); color: #c8a96e;
+      border: 1px solid rgba(200,169,110,.22);
+    }
+
+    .cta-btn {
+      display: block; width: 100%; padding: 13px;
+      background: linear-gradient(135deg, #c8a96e, #a07840);
+      color: #fff; font-size: .9rem; font-weight: 700;
+      text-align: center; border: none; border-radius: 12px;
+      cursor: pointer; letter-spacing: .04em; text-decoration: none;
+      transition: opacity .2s, transform .15s;
+    }
+    .cta-btn:hover { opacity: .9; transform: translateY(-1px); }
+
+    /* ── Legend ── */
+    #legend {
+      position: fixed; bottom: 24px; right: 18px; z-index: 1050;
+      background: rgba(13,13,20,.88); backdrop-filter: blur(14px);
+      border: 1px solid rgba(255,255,255,.1); border-radius: 16px;
+      padding: 16px 18px; min-width: 220px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.5);
+    }
+    .legend-title {
+      font-size: .72rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .12em; color: #c8a96e; margin-bottom: 10px;
+    }
+    .legend-section { margin-bottom: 12px; }
+    .legend-sub {
+      font-size: .67rem; text-transform: uppercase; letter-spacing: .1em;
+      color: #666; margin-bottom: 6px;
+    }
+    .legend-item {
+      display: flex; align-items: center; gap: 8px;
+      font-size: .75rem; color: #ccc; margin-bottom: 5px;
+    }
+    .legend-swatch {
+      width: 14px; height: 14px; border-radius: 4px; flex-shrink: 0;
+    }
+    .legend-circle {
+      width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0;
+    }
+    .legend-villa-icon {
+      width: 18px; height: 18px; border-radius: 50%;
+      background: #c8a96e; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px;
+    }
+
+    /* ── Spot tooltip ── */
+    .spot-tooltip {
+      background: rgba(13,13,20,.92) !important;
+      border: 1px solid rgba(255,255,255,.12) !important;
+      color: #f0ede8 !important; border-radius: 8px !important;
+      padding: 5px 10px !important; font-size: .76rem !important;
+      box-shadow: 0 4px 16px rgba(0,0,0,.4) !important;
+    }
+
+    /* ── Custom villa marker ── */
+    .villa-marker {
+      width: 42px; height: 42px; border-radius: 50%;
+      background: linear-gradient(135deg,#c8a96e,#8a5f28);
+      border: 3px solid #fff; box-shadow: 0 4px 14px rgba(0,0,0,.45);
+      display: flex; align-items: center; justify-content: center;
+      color: #fff; font-size: 18px; cursor: pointer;
+      transition: transform .2s;
+    }
+    .villa-marker:hover { transform: scale(1.12); }
+
+    .spot-marker {
+      width: 28px; height: 28px; border-radius: 50%;
+      border: 2px solid rgba(255,255,255,.6);
+      box-shadow: 0 3px 10px rgba(0,0,0,.4);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; cursor: pointer;
+    }
+
+    /* ── Controls info ── */
+    #map-info {
+      position: fixed; top: 70px; left: 18px; z-index: 1050;
+      background: rgba(13,13,20,.82); backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,.1); border-radius: 12px;
+      padding: 10px 14px; font-size: .73rem; color: #aaa;
+      line-height: 1.6;
+    }
+    #map-info strong { color: #c8a96e; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">space<span>z</span></div>
+  <div class="tagline">Luxury Villas · Bangalore</div>
+</header>
+
+<div id="map"></div>
+
+<div id="map-info">
+  <strong>🏠 5 Villas</strong> across Bangalore<br>
+  Click a marker to explore & book
+</div>
+
+<div id="legend">
+  <div class="legend-title">Map Legend</div>
+
+  <div class="legend-section">
+    <div class="legend-sub">Villas</div>
+    <div class="legend-item">
+      <div class="legend-villa-icon">🏠</div>
+      SpaceZ Luxury Villa
+    </div>
+  </div>
+
+  <div class="legend-section">
+    <div class="legend-sub">Neighbourhood Vibe</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:rgba(168,110,200,.45)"></div>Trendy / Tech Hub</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:rgba(255,140,60,.4)"></div>Nightlife / Dining</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:rgba(80,180,120,.4)"></div>Residential / Peaceful</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:rgba(200,169,80,.4)"></div>Upscale / Premium</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:rgba(80,150,230,.4)"></div>IT Hub / Modern</div>
+  </div>
+
+  <div class="legend-section">
+    <div class="legend-sub">Nearby Hotspots</div>
+    <div class="legend-item"><div class="legend-circle" style="background:#4caf7d"></div>🌿 Nature</div>
+    <div class="legend-item"><div class="legend-circle" style="background:#e67e3a"></div>🍽️ Dining</div>
+    <div class="legend-item"><div class="legend-circle" style="background:#9b59b6"></div>🛍️ Shopping</div>
+    <div class="legend-item"><div class="legend-circle" style="background:#e74c3c"></div>🎭 Entertainment</div>
+    <div class="legend-item"><div class="legend-circle" style="background:#3498db"></div>🏛️ Heritage</div>
+  </div>
+</div>
+
+<script>
+// ── Map init ──────────────────────────────────────────────
+const map = L.map('map', { zoomControl: false, minZoom: 11 }).setView([12.9352, 77.6245], 12);
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
+  subdomains: 'abcd', maxZoom: 19
+}).addTo(map);
+
+L.control.zoom({ position: 'topright' }).addTo(map);
+
+// ── Neighbourhood polygons ────────────────────────────────
+const neighbourhoods = [
+  {
+    name: 'Koramangala',
+    vibe: 'Trendy / Tech Hub',
+    color: 'rgba(168,110,200,.45)',
+    stroke: '#a86ec8',
+    coords: [
+      [12.9350,77.6150],[12.9350,77.6420],[12.9180,77.6420],[12.9180,77.6150]
+    ]
+  },
+  {
+    name: 'Indiranagar',
+    vibe: 'Nightlife / Dining',
+    color: 'rgba(255,140,60,.4)',
+    stroke: '#ff8c3c',
+    coords: [
+      [12.9800,77.6280],[12.9800,77.6520],[12.9600,77.6520],[12.9600,77.6280]
+    ]
+  },
+  {
+    name: 'JP Nagar',
+    vibe: 'Residential / Peaceful',
+    color: 'rgba(80,180,120,.4)',
+    stroke: '#50b478',
+    coords: [
+      [12.8800,77.5600],[12.8800,77.5900],[12.8500,77.5900],[12.8500,77.5600]
+    ]
+  },
+  {
+    name: 'Kodihalli',
+    vibe: 'Upscale / Premium',
+    color: 'rgba(200,169,80,.4)',
+    stroke: '#c8a950',
+    coords: [
+      [12.9700,77.6380],[12.9700,77.6600],[12.9500,77.6600],[12.9500,77.6380]
+    ]
+  },
+  {
+    name: 'Whitefield',
+    vibe: 'IT Hub / Modern',
+    color: 'rgba(80,150,230,.4)',
+    stroke: '#5096e6',
+    coords: [
+      [12.9700,77.7100],[12.9700,77.7500],[12.9400,77.7500],[12.9400,77.7100]
+    ]
+  }
+];
+
+neighbourhoods.forEach(n => {
+  const poly = L.polygon(n.coords, {
+    color: n.stroke, weight: 2, opacity: .8,
+    fillColor: n.color, fillOpacity: 1
+  }).addTo(map);
+
+  poly.bindTooltip(`<strong>${n.name}</strong><br><span style="font-size:.72rem;color:#aaa">${n.vibe}</span>`, {
+    className: 'spot-tooltip', sticky: true
+  });
+});
+
+// ── Villas data ───────────────────────────────────────────
+const villas = [
+  {
+    name: 'Aurora Heights',
+    area: 'JP Nagar',
+    lat: 12.8648, lng: 77.5736,
+    beds: 4, baths: 4, guests: 15,
+    price: '₹22,500', originalPrice: null,
+    rating: 5.0, reviews: 11,
+    amenities: ['Free Parking', 'AC', 'Wi-Fi', 'Chef Available', 'BBQ', 'Pet Friendly'],
+    checkIn: '1:00 PM', checkOut: '11:00 AM',
+    images: [
+      'https://images.unsplash.com/photo-1613490493576-7fde63acd811?w=700&q=80',
+      'https://images.unsplash.com/photo-1582268611958-ebfd161ef9cf?w=700&q=80',
+      'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=700&q=80',
+      'https://images.unsplash.com/photo-1578683010236-d716f9a3f461?w=700&q=80',
+    ],
+    bookUrl: 'https://www.spacez.co'
+  },
+  {
+    name: 'Billionaires Glasshouse',
+    area: 'Koramangala',
+    lat: 12.9284, lng: 77.6285,
+    beds: 5, baths: 4, guests: 14,
+    price: '₹16,750', originalPrice: null,
+    rating: 4.8, reviews: 8,
+    amenities: ['Infinity Pool', 'AC', 'Wi-Fi', 'Home Theatre', 'Bar Setup', 'Concierge'],
+    checkIn: '1:00 PM', checkOut: '11:00 AM',
+    images: [
+      'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?w=700&q=80',
+      'https://images.unsplash.com/photo-1600607687920-4e2a09cf159d?w=700&q=80',
+      'https://images.unsplash.com/photo-1600566753190-17f0baa2a6c3?w=700&q=80',
+      'https://images.unsplash.com/photo-1571896349842-33c89424de2d?w=700&q=80',
+    ],
+    bookUrl: 'https://www.spacez.co'
+  },
+  {
+    name: 'Bohemian Escapade',
+    area: 'Indiranagar',
+    lat: 12.9729, lng: 77.6400,
+    beds: 2, baths: 2, guests: 4,
+    price: '₹8,750', originalPrice: null,
+    rating: 4.7, reviews: 5,
+    amenities: ['AC', 'Wi-Fi', 'Fully Equipped Kitchen', 'Balcony', 'Smart TV'],
+    checkIn: '1:00 PM', checkOut: '11:00 AM',
+    images: [
+      'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=700&q=80',
+      'https://images.unsplash.com/photo-1600210492493-0946911123ea?w=700&q=80',
+      'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=700&q=80',
+      'https://images.unsplash.com/photo-1556020685-ae41abfc9365?w=700&q=80',
+    ],
+    bookUrl: 'https://www.spacez.co'
+  },
+  {
+    name: 'Bougain Blossom',
+    area: 'Kodihalli',
+    lat: 12.9622, lng: 77.6485,
+    beds: 4, baths: 5, guests: 10,
+    price: '₹22,500', originalPrice: null,
+    rating: 5.0, reviews: 10,
+    amenities: ['Garden', 'AC', 'Wi-Fi', 'Chef Available', 'BBQ', 'Party Setup'],
+    checkIn: '1:00 PM', checkOut: '11:00 AM',
+    images: [
+      'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=700&q=80',
+      'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=700&q=80',
+      'https://images.unsplash.com/photo-1600585154526-990dced4db0d?w=700&q=80',
+      'https://images.unsplash.com/photo-1502005229762-cf1b2da7c5d6?w=700&q=80',
+    ],
+    bookUrl: 'https://www.spacez.co'
+  },
+  {
+    name: 'Casa Blu',
+    area: 'Whitefield',
+    lat: 12.9582, lng: 77.7322,
+    beds: 4, baths: 4, guests: 10,
+    price: '₹16,430', originalPrice: null,
+    rating: 5.0, reviews: 24,
+    amenities: ['Private Pool', 'AC', 'Wi-Fi', 'Home Theatre', 'BBQ', 'Parking'],
+    checkIn: '1:00 PM', checkOut: '11:00 AM',
+    images: [
+      'https://images.unsplash.com/photo-1605146768851-eda79da39897?w=700&q=80',
+      'https://images.unsplash.com/photo-1574359411659-15573a27fd0c?w=700&q=80',
+      'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=700&q=80',
+      'https://images.unsplash.com/photo-1540518614846-7eded433c457?w=700&q=80',
+    ],
+    bookUrl: 'https://www.spacez.co'
+  }
+];
+
+// ── Nearby hotspots ───────────────────────────────────────
+const hotspots = [
+  { name: 'Cubbon Park', cat: 'Nature',        emoji: '🌿', color: '#4caf7d', lat: 12.9763, lng: 77.5929 },
+  { name: 'Lalbagh Botanical Garden', cat: 'Nature', emoji: '🌿', color: '#4caf7d', lat: 12.9507, lng: 77.5848 },
+  { name: 'UB City Mall', cat: 'Shopping',     emoji: '🛍️', color: '#9b59b6', lat: 12.9715, lng: 77.5966 },
+  { name: 'Brigade Road', cat: 'Shopping',     emoji: '🛍️', color: '#9b59b6', lat: 12.9740, lng: 77.6077 },
+  { name: 'Forum Mall Whitefield', cat:'Shopping', emoji:'🛍️', color:'#9b59b6', lat:12.9718, lng:77.7509 },
+  { name: '100ft Rd Indiranagar', cat: 'Dining', emoji: '🍽️', color: '#e67e3a', lat: 12.9784, lng: 77.6408 },
+  { name: 'Church Street Social', cat: 'Dining', emoji: '🍽️', color: '#e67e3a', lat: 12.9742, lng: 77.6080 },
+  { name: 'Koramangala Food Street', cat: 'Dining', emoji: '🍽️', color: '#e67e3a', lat: 12.9327, lng: 77.6244 },
+  { name: 'HAL Aerospace Museum', cat: 'Heritage', emoji: '🏛️', color: '#3498db', lat: 12.9500, lng: 77.6710 },
+  { name: 'Tipu Sultan's Summer Palace', cat: 'Heritage', emoji: '🏛️', color: '#3498db', lat: 12.9601, lng: 77.5741 },
+  { name: 'Hard Rock Cafe', cat: 'Entertainment', emoji: '🎭', color: '#e74c3c', lat: 12.9714, lng: 77.5969 },
+  { name: 'Phoenix MarketCity', cat: 'Entertainment', emoji: '🎭', color: '#e74c3c', lat: 12.9961, lng: 77.6970 },
+];
+
+hotspots.forEach(spot => {
+  const icon = L.divIcon({
+    className: '',
+    html: `<div class="spot-marker" style="background:${spot.color};">${spot.emoji}</div>`,
+    iconSize: [28, 28], iconAnchor: [14, 14]
+  });
+  L.marker([spot.lat, spot.lng], { icon })
+    .addTo(map)
+    .bindTooltip(`<strong>${spot.name}</strong><br><span style="font-size:.7rem;color:#aaa">${spot.cat}</span>`, {
+      className: 'spot-tooltip', direction: 'top', offset: [0, -10]
+    });
+});
+
+// ── Carousel builder ──────────────────────────────────────
+function buildCarousel(villa) {
+  const id = `c-${villa.name.replace(/\s/g,'-')}`;
+  const slides = villa.images.map(
+    (src,i) => `<img class="carousel-slide" src="${src}" alt="${villa.name} ${i+1}" loading="lazy" />`
+  ).join('');
+  const dots = villa.images.map(
+    (_,i) => `<div class="dot${i===0?' active':''}" data-i="${i}" data-id="${id}"></div>`
+  ).join('');
+  const stars = '★'.repeat(Math.floor(villa.rating)) + (villa.rating%1?'½':'');
+  const amenityPills = villa.amenities.map(a=>`<span class="pill">${a}</span>`).join('');
+
+  return `
+  <div class="villa-card" id="${id}">
+    <div class="carousel">
+      <div class="carousel-track" id="${id}-track">${slides}</div>
+      <div class="villa-badge">SpaceZ</div>
+      <div class="rating-badge">⭐ ${villa.rating} <span style="color:#888;font-weight:400">(${villa.reviews})</span></div>
+      <button class="carousel-btn prev" onclick="carouselNav('${id}',-1)">&#8249;</button>
+      <button class="carousel-btn next" onclick="carouselNav('${id}',1)">&#8250;</button>
+      <div class="carousel-dots" id="${id}-dots">${dots}</div>
+    </div>
+    <div class="card-body">
+      <div class="villa-name">${villa.name}</div>
+      <div class="villa-location">
+        <svg width="11" height="13" viewBox="0 0 24 24" fill="#c8a96e"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+        ${villa.area}, Bengaluru
+      </div>
+      <div class="villa-stats">
+        <div class="stat">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 14c1.66 0 3-1.34 3-3S8.66 8 7 8s-3 1.34-3 3 1.34 3 3 3zm12-7h-8v8H3V5H1v15h2v-3h18v3h2v-9c0-2.21-1.79-4-4-4z"/></svg>
+          ${villa.beds} Beds
+        </div>
+        <div class="stat">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M21 10H7V7c0-1.1.9-2 2-2h6c1.1 0 2 .9 2 2v1h4v2zm-9 2.5c0 .83-.67 1.5-1.5 1.5S9 13.33 9 12.5 9.67 11 10.5 11s1.5.67 1.5 1.5zM3 16h18v4H3z"/></svg>
+          ${villa.baths} Baths
+        </div>
+        <div class="stat">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+          ${villa.guests} Guests
+        </div>
+      </div>
+      <div class="price-row">
+        <div><span class="price">${villa.price}</span><sub> /night</sub></div>
+        <div style="font-size:.71rem;color:#888">Check-in: ${villa.checkIn}</div>
+      </div>
+      <div class="amenity-pills">${amenityPills}</div>
+      <a class="cta-btn" href="${villa.bookUrl}" target="_blank" rel="noopener">
+        Book Now &nbsp;→
+      </a>
+    </div>
+  </div>`;
+}
+
+// ── Carousel logic ────────────────────────────────────────
+const carouselState = {};
+
+function carouselNav(id, dir) {
+  if (!carouselState[id]) carouselState[id] = 0;
+  const track = document.getElementById(id + '-track');
+  if (!track) return;
+  const total = track.children.length;
+  carouselState[id] = (carouselState[id] + dir + total) % total;
+  track.style.transform = `translateX(-${carouselState[id] * 100}%)`;
+  updateDots(id, total);
+}
+
+function goToSlide(id, i) {
+  carouselState[id] = i;
+  const track = document.getElementById(id + '-track');
+  if (track) track.style.transform = `translateX(-${i * 100}%)`;
+  const total = track ? track.children.length : 0;
+  updateDots(id, total);
+}
+
+function updateDots(id, total) {
+  const dotsEl = document.getElementById(id + '-dots');
+  if (!dotsEl) return;
+  [...dotsEl.children].forEach((d, j) => {
+    d.classList.toggle('active', j === carouselState[id]);
+  });
+}
+
+// Delegate dot clicks
+document.addEventListener('click', e => {
+  if (e.target.classList.contains('dot')) {
+    goToSlide(e.target.dataset.id, +e.target.dataset.i);
+  }
+});
+
+// ── Villa markers ─────────────────────────────────────────
+villas.forEach(villa => {
+  const icon = L.divIcon({
+    className: '',
+    html: `<div class="villa-marker">🏠</div>`,
+    iconSize: [42, 42], iconAnchor: [21, 21], popupAnchor: [0, -24]
+  });
+
+  const marker = L.marker([villa.lat, villa.lng], { icon }).addTo(map);
+
+  marker.bindPopup(buildCarousel(villa), {
+    maxWidth: 340, minWidth: 340,
+    className: 'villa-popup',
+    autoPan: true, autoPanPaddingTopLeft: [20, 70], autoPanPaddingBottomRight: [20, 20]
+  });
+
+  marker.bindTooltip(villa.name, {
+    className: 'spot-tooltip', direction: 'top', offset: [0, -26], permanent: false
+  });
+});
+</script>
+</body>
+</html>
